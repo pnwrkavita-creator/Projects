@@ -1,0 +1,88 @@
+name: "Terraform Multi-Env CI/CD"
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - dev
+
+  pull_request:
+    branches:
+      - main
+      - test
+      - dev
+
+env:
+  TF_LOG: INFO
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  # BUCKET_TF_STATE: ${{ secrets.BUCKET_TF_STATE}}
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  terraform-plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    outputs:
+      tf_workspace: ${{ steps.env-vars.outputs.tf_workspace }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: v0.52.0
+
+      - name: Init TFLint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: tflint --init
+
+      - name: Run TFLint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: tflint -f compact
+
+      - name: Run Trivy vulnerability scanner in IaC mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          hide-progress: false
+          format: "table"
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+    
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -var-file=$TF_VAR_FILE -no-color -input=false -out=tfplan
+        continue-on-error: true
